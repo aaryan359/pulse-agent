@@ -65,38 +65,7 @@ docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e AGENT_API_KEY="test-key" \
   monitoring-agent
-```
 
-## 📁 Project Structure
-
-```
-agent/
-├── cmd/
-│   └── agent/
-│       └── main.go              # Entry point
-├── internal/
-│   ├── config/
-│   │   └── config.go           # Configuration loading
-│   ├── docker/
-│   │   ├── client.go           # Docker client
-│   │   └── stats.go            # Container stats
-│   ├── system/
-│   │   └── system.go           # System metrics
-│   ├── collector/
-│   │   └── collector.go        # Main collector
-│   ├── sender/
-│   │   └── sender.go           # Backend communication
-│   ├── scheduler/
-│   │   └── scheduler.go        # Collection scheduler
-│   └── models/
-│       └── payload.go          # Data structures
-├── pkg/
-│   └── logger/
-│       └── logger.go           # Logging
-├── Dockerfile
-├── go.mod
-└── README.md
-```
 
 ## 🔧 Configuration
 
@@ -172,28 +141,7 @@ LOG_LEVEL              # info/debug/warn/error (default: info)
 └──────────────────────────┘
 ```
 
-**Design principles:**
-- Simple loops, no magic
-- Clear boundaries between components
-- Easy to extend without rewrites
-- Testable components
-- Production-ready from day one
 
-## 🧪 Testing
-
-```bash
-# Run tests
-go test ./...
-
-# Run with verbose output
-go test -v ./...
-
-# Test specific package
-go test ./internal/collector
-
-# With coverage
-go test -cover ./...
-```
 
 ## 📦 Deployment
 
@@ -253,11 +201,6 @@ docker restart monitoring-agent
 
 MIT License - see LICENSE file
 
-## 🆘 Support
-
-- Documentation: https://docs.yourapp.com
-- Issues: https://github.com/yourorg/agent/issues
-- Email: support@yourapp.com
 
 ---
 

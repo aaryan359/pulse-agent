@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  agent:
+    build: .
+    container_name: monitoring-agent
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - AGENT_API_KEY=${AGENT_API_KEY:-test-key-123}
+      - AGENT_BACKEND_URL=${AGENT_BACKEND_URL:-http://mock-backend:8000}
+      - AGENT_SERVER_ID=${AGENT_SERVER_ID:-local-dev}
+      - AGENT_INTERVAL=${AGENT_INTERVAL:-10}
+      - AGENT_ENV=development
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+    depends_on:
+      - mock-backend
+    networks:
+      - monitoring
+
+  mock-backend:
+    image: kennethreitz/httpbin
+    container_name: mock-backend
+    ports:
+      - "8000:80"
+    networks:
+      - monitoring
+
+  # Example: Add some containers to monitor
+  nginx-example:
+    image: nginx:alpine
+    container_name: nginx-example
+    ports:
+      - "8080:80"
+    networks:
+      - monitoring
+
+  redis-example:
+    image: redis:alpine
+    container_name: redis-example
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge
+
+# Usage:
+# 1. Start everything: docker-compose up
+# 2. View logs: docker-compose logs -f agent
+# 3. Stop: docker-compose down
+# 4. Rebuild: docker-compose up --build

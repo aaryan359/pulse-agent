@@ -52,7 +52,7 @@ func (c *Collector) Collect(ctx context.Context) (*models.Payload, error) {
 		if err != nil {
 			logger.Error("Failed to collect container stats: %v", err)
 		} else {
-			payload.Containers = payload.Containers
+			payload.Containers = containers
 			payload.ContainerCount = len(containers)
 		}
 	}

@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"pulse_agent/internal/collector"
@@ -58,6 +59,9 @@ func (s *Scheduler) runCollection() {
 		logger.Error("Collection failed: %v", err)
 		return
 	}
+
+	data, _ := json.MarshalIndent(payload, "", "  ")
+	logger.Debug("FULL PAYLOAD:\n%s", string(data))
 
 	err = s.sender.Send(ctx, payload)
 	if err != nil {

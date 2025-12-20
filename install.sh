@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Monitoring Agent Bootstrap Installer
-# Usage: curl -fsSL https://yourapp.com/install.sh | bash
+# Or with API key: curl -fsSL https://yourapp.com/install.sh | API_KEY=your-key bash
 
 set -e
 
@@ -9,6 +8,7 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}=====================================${NC}"
@@ -17,57 +17,112 @@ echo -e "${GREEN}=====================================${NC}"
 echo ""
 
 # Configuration
-AGENT_IMAGE="yourregistry/monitoring-agent:latest"
-AGENT_NAME="monitoring-agent"
+AGENT_IMAGE="${AGENT_IMAGE:-yourregistry/monitoring-agent:latest}"
+AGENT_NAME="${AGENT_NAME:-monitoring-agent}"
 BACKEND_URL="${BACKEND_URL:-https://api.yourapp.com}"
 API_KEY="${API_KEY:-}"
+INTERVAL="${AGENT_INTERVAL:-10s}"
+ENV="${AGENT_ENV:-production}"
+LOG_LEVEL="${LOG_LEVEL:-info}"
 
-# Check if running as root
+# Check if running as root (warn but don't fail)
 if [ "$EUID" -ne 0 ]; then 
-    echo -e "${YELLOW}Warning: Not running as root. Some operations may require sudo.${NC}"
+    echo -e "${YELLOW}⚠ Warning: Not running as root. Some operations may require sudo.${NC}"
+    SUDO="sudo"
+else
+    SUDO=""
 fi
+
+# Function to check command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
 
 # Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Error: Docker is not installed.${NC}"
-    echo "Please install Docker first: https://docs.docker.com/engine/install/"
+echo "Checking Docker installation..."
+if ! command_exists docker; then
+    echo -e "${RED}✗ Error: Docker is not installed.${NC}"
+    echo ""
+    echo "Please install Docker first:"
+    echo "  Ubuntu/Debian: curl -fsSL https://get.docker.com | sh"
+    echo "  Or visit: https://docs.docker.com/engine/install/"
     exit 1
 fi
+
+echo -e "${GREEN}✓${NC} Docker is installed"
 
 # Check if Docker daemon is running
-if ! docker info &> /dev/null; then
-    echo -e "${RED}Error: Docker daemon is not running.${NC}"
-    echo "Please start Docker and try again."
+echo "Checking Docker daemon..."
+if ! $SUDO docker info >/dev/null 2>&1; then
+    echo -e "${RED}✗ Error: Docker daemon is not running.${NC}"
+    echo ""
+    echo "Please start Docker:"
+    echo "  sudo systemctl start docker"
+    echo "  or: sudo service docker start"
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} Docker is installed and running"
+echo -e "${GREEN}✓${NC} Docker daemon is running"
+
+# Check Docker permissions
+if [ "$EUID" -ne 0 ] && ! docker ps >/dev/null 2>&1; then
+    echo -e "${YELLOW}⚠ Warning: Current user doesn't have Docker permissions${NC}"
+    echo "Adding user to docker group (you may need to log out and back in)..."
+    $SUDO usermod -aG docker "$USER" || true
+    echo "Using sudo for Docker commands..."
+    SUDO="sudo"
+fi
 
 # Get API key if not provided
 if [ -z "$API_KEY" ]; then
     echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo "You need an API key to connect the agent to your account."
-    echo "Get your API key from: https://yourapp.com/settings/api-keys"
+    echo "Get your API key from: ${BLUE}https://yourapp.com/settings/api-keys${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     read -p "Enter your API key: " API_KEY
     
     if [ -z "$API_KEY" ]; then
-        echo -e "${RED}Error: API key is required${NC}"
+        echo -e "${RED}✗ Error: API key is required${NC}"
+        exit 1
+    fi
+fi
+
+# Validate API key format (basic check)
+if [ ${#API_KEY} -lt 10 ]; then
+    echo -e "${YELLOW}⚠ Warning: API key seems too short. Are you sure it's correct?${NC}"
+    read -p "Continue anyway? (y/N): " confirm
+    if [[ ! $confirm =~ ^[Yy]$ ]]; then
         exit 1
     fi
 fi
 
 # Stop and remove existing agent if present
-if docker ps -a --format '{{.Names}}' | grep -q "^${AGENT_NAME}$"; then
-    echo -e "${YELLOW}Stopping existing agent...${NC}"
-    docker stop $AGENT_NAME &> /dev/null || true
-    docker rm $AGENT_NAME &> /dev/null || true
+if $SUDO docker ps -a --format '{{.Names}}' | grep -q "^${AGENT_NAME}$"; then
+    echo -e "${YELLOW}Found existing agent, stopping and removing...${NC}"
+    $SUDO docker stop $AGENT_NAME >/dev/null 2>&1 || true
+    $SUDO docker rm $AGENT_NAME >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓${NC} Old agent removed"
 fi
+
+# Create persistent data directory
+echo "Creating persistent storage..."
+DATA_DIR="/var/lib/pulse-agent"
+$SUDO mkdir -p "$DATA_DIR"
+$SUDO chmod 755 "$DATA_DIR"
+echo -e "${GREEN}✓${NC} Storage created at $DATA_DIR"
 
 # Pull latest agent image
 echo "Pulling latest agent image..."
-if ! docker pull $AGENT_IMAGE; then
-    echo -e "${RED}Error: Failed to pull agent image${NC}"
+if ! $SUDO docker pull $AGENT_IMAGE; then
+    echo -e "${RED}✗ Error: Failed to pull agent image${NC}"
+    echo "Image: $AGENT_IMAGE"
+    echo ""
+    echo "Possible solutions:"
+    echo "  1. Check your internet connection"
+    echo "  2. Verify the image name is correct"
+    echo "  3. Check if you need to login: docker login"
     exit 1
 fi
 
@@ -78,40 +133,59 @@ HOSTNAME=$(hostname)
 
 # Start the agent
 echo "Starting monitoring agent..."
-docker run -d \
+if ! $SUDO docker run -d \
     --name $AGENT_NAME \
     --restart unless-stopped \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    -v $DATA_DIR:/root/.pulse \
     -e AGENT_API_KEY="$API_KEY" \
     -e AGENT_BACKEND_URL="$BACKEND_URL" \
-    -e AGENT_SERVER_ID="$HOSTNAME" \
-    -e AGENT_INTERVAL="10" \
-    -e LOG_LEVEL="info" \
-    $AGENT_IMAGE
-
-# Wait for agent to start
-sleep 3
-
-# Check if agent is running
-if docker ps --format '{{.Names}}' | grep -q "^${AGENT_NAME}$"; then
-    echo ""
-    echo -e "${GREEN}=====================================${NC}"
-    echo -e "${GREEN}  ✓ Agent installed successfully!${NC}"
-    echo -e "${GREEN}=====================================${NC}"
-    echo ""
-    echo "Server ID: $HOSTNAME"
-    echo "Backend: $BACKEND_URL"
-    echo ""
-    echo "Your server should appear in your mobile app within 30 seconds."
-    echo ""
-    echo "Useful commands:"
-    echo "  View logs:    docker logs -f $AGENT_NAME"
-    echo "  Stop agent:   docker stop $AGENT_NAME"
-    echo "  Start agent:  docker start $AGENT_NAME"
-    echo "  Remove agent: docker stop $AGENT_NAME && docker rm $AGENT_NAME"
-    echo ""
-else
-    echo -e "${RED}Error: Agent failed to start${NC}"
-    echo "View logs with: docker logs $AGENT_NAME"
+    -e AGENT_INTERVAL="$INTERVAL" \
+    -e AGENT_ENV="$ENV" \
+    -e LOG_LEVEL="$LOG_LEVEL" \
+    $AGENT_IMAGE; then
+    
+    echo -e "${RED}✗ Error: Failed to start agent${NC}"
+    echo "View logs with: $SUDO docker logs $AGENT_NAME"
     exit 1
 fi
+
+# Wait for agent to start
+echo "Waiting for agent to initialize..."
+sleep 5
+
+# Check if agent is running
+if ! $SUDO docker ps --format '{{.Names}}' | grep -q "^${AGENT_NAME}$"; then
+    echo -e "${RED}✗ Error: Agent failed to start${NC}"
+    echo ""
+    echo "Recent logs:"
+    $SUDO docker logs --tail 20 $AGENT_NAME
+    echo ""
+    echo "View full logs: $SUDO docker logs $AGENT_NAME"
+    exit 1
+fi
+
+# Success message
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  ✓ Agent installed successfully!${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "${BLUE}Server Details:${NC}"
+echo "  • Hostname: $HOSTNAME"
+echo "  • Backend: $BACKEND_URL"
+echo "  • Environment: $ENV"
+echo "  • Interval: $INTERVAL"
+echo "  • Data Dir: $DATA_DIR"
+echo ""
+echo -e "${BLUE}Your server should appear in your dashboard within 30 seconds.${NC}"
+echo ""
+echo -e "${BLUE}Useful Commands:${NC}"
+echo "  • View logs:      $SUDO docker logs -f $AGENT_NAME"
+echo "  • Stop agent:     $SUDO docker stop $AGENT_NAME"
+echo "  • Start agent:    $SUDO docker start $AGENT_NAME"
+echo "  • Restart agent:  $SUDO docker restart $AGENT_NAME"
+echo "  • Remove agent:   $SUDO docker stop $AGENT_NAME && $SUDO docker rm $AGENT_NAME"
+echo "  • Update agent:   $SUDO docker pull $AGENT_IMAGE && $SUDO docker restart $AGENT_NAME"
+echo ""
+echo -e "${GREEN}Installation complete! 🎉${NC}"

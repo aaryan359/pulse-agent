@@ -1,11 +1,14 @@
-// internal/config/config.go
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -13,31 +16,55 @@ type Config struct {
 	BackendURL  string
 	Interval    time.Duration
 	ServerID    string
+	Hostname    string
 	Environment string
+	OS          string
+	Arch        string
 }
 
 func Load() (*Config, error) {
-	env := getEnv("AGENT_ENV", "production")
-	devMode := env == "development"
+	// Load .env if present (no error in prod)
+	_ = godotenv.Load()
 
-	apiKey := getEnv("AGENT_API_KEY", "")
-	if apiKey == "" && !devMode {
-		return nil, fmt.Errorf("AGENT_API_KEY is required")
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown-host"
 	}
 
-	backendURL := getEnv("AGENT_BACKEND_URL", "https://api.yourapp.com")
-	intervalSec := getEnvInt("AGENT_INTERVAL", 1)
-	serverID := getEnv("AGENT_SERVER_ID", generateServerID())
-	environment := getEnv("AGENT_ENV", "production")
+	env := getEnv("AGENT_ENV", "production")
+	isDev := env == "development"
 
-	return &Config{
-		APIKey:      apiKey,
-		BackendURL:  backendURL,
-		Interval:    time.Duration(intervalSec) * time.Second,
-		ServerID:    serverID,
-		Environment: environment,
-	}, nil
+	cfg := &Config{
+		Environment: env,
+		BackendURL:  getEnv("AGENT_BACKEND_URL", "http://localhost:3000"),
+		Hostname:    hostname,
+		OS:          runtime.GOOS,
+		Arch:        runtime.GOARCH,
+	}
+
+	// API Key (required in non-dev)
+	cfg.APIKey = getEnv("AGENT_API_KEY", "")
+	if cfg.APIKey == "" && !isDev {
+		return nil, errors.New("AGENT_API_KEY is required in production")
+	}
+
+	// Interval (supports 1s, 5s, 1m)
+	intervalRaw := getEnv("AGENT_INTERVAL", "10s")
+	interval, err := parseInterval(intervalRaw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid AGENT_INTERVAL: %w", err)
+	}
+	cfg.Interval = interval
+
+	// Validate backend URL
+	if cfg.BackendURL == "" {
+		return nil, errors.New("AGENT_BACKEND_URL is required")
+	}
+
+	return cfg, nil
 }
+
+/* -------------------- helpers -------------------- */
 
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
@@ -46,20 +73,24 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getEnvInt(key string, fallback int) int {
-	if value := os.Getenv(key); value != "" {
-		if intVal, err := strconv.Atoi(value); err == nil {
-			return intVal
+func parseInterval(value string) (time.Duration, error) {
+	// Try duration format first: "1s", "500ms", "1m"
+	if d, err := time.ParseDuration(value); err == nil {
+		if d < 1*time.Second {
+			return 0, fmt.Errorf("interval must be at least 1 second")
 		}
+		return d, nil
 	}
-	return fallback
-}
 
-func generateServerID() string {
-	// Try to get hostname
-	hostname, err := os.Hostname()
+	// Fallback: plain seconds "5"
+	seconds, err := strconv.Atoi(value)
 	if err != nil {
-		return "unknown-server"
+		return 0, fmt.Errorf("must be duration (e.g. 5s, 1m) or seconds")
 	}
-	return hostname
+
+	if seconds < 1 {
+		return 0, fmt.Errorf("interval must be at least 1 second")
+	}
+
+	return time.Duration(seconds) * time.Second, nil
 }

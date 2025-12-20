@@ -27,7 +27,9 @@ func Init() {
 	warnLogger = log.New(os.Stdout, "", 0)
 	debugLogger = log.New(os.Stdout, "", 0)
 }
-
+func IsDebugEnabled() bool {
+	return logLevel == "debug"
+}
 func formatMessage(level, format string, v ...interface{}) string {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, v...)

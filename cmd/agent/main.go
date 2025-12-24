@@ -11,6 +11,7 @@ import (
 	"pulse_agent/internal/config"
 	"pulse_agent/internal/scheduler"
 	"pulse_agent/internal/sender"
+	"pulse_agent/internal/ws"
 	"pulse_agent/pkg/logger"
 )
 
@@ -46,6 +47,18 @@ func main() {
 	// Attach server ID to config
 	cfg.ServerID = serverID
 
+	go func() {
+		for {
+			logger.Info("Connecting agent terminal WS...")
+			err := ws.ConnectAgentWS(ctx, cfg, serverID)
+			if err != nil {
+				logger.Warn("Agent WS disconnected: %v", err)
+			}
+
+			// 🔄 auto-reconnect delay
+			time.Sleep(5 * time.Second)
+		}
+	}()
 	// Start scheduler (metrics collection + sending)
 	sched := scheduler.New(cfg)
 	go sched.Start()
@@ -62,6 +75,7 @@ func main() {
 
 	logger.Info("Agent stopped gracefully")
 }
+
 func registerOrLoadServer(ctx context.Context, cfg *config.Config) (string, error) {
 	identity, err := agent.LoadServerIdentity()
 	if err != nil {

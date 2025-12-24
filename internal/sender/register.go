@@ -29,6 +29,9 @@ func RegisterAgent(ctx context.Context, cfg *config.Config) (string, error) {
 		"arch":        cfg.Arch,
 	}
 
+	// TODO: separate logical server identity from agent UUID
+	// to preserve server history across API key rotation
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal registration payload failed: %w", err)
